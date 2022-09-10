@@ -11,7 +11,17 @@ enum Item {
 }
 
 impl Fidd {
+	pub fn len(&self) -> usize {
+		self.items.len()
+	}
+
+	pub fn is_empty(&self) -> bool {
+		self.items.is_empty()
+	}
+
+	// TODO: fast mode(src_idx step window)
 	pub fn new(src: &[Vec<u8>], dst: &[Vec<u8>]) -> Self {
+		eprintln!("{} {}", src.len(), dst.len());
 		let mut pairmap = HashMap::new();
 		if dst.is_empty() {
 			return Self::default()
@@ -22,7 +32,8 @@ impl Fidd {
 		}
 		let mut segments = Vec::new();
 		for src_idx in 0..src.len() - 1 {
-			let mut indices = if let Some(indices)
+			eprintln!("{}", src_idx);
+			let mut last_indices = if let Some(indices)
 				= pairmap.get(&[&src[src_idx], &src[src_idx + 1]])
 			{
 				indices.clone()
@@ -31,50 +42,92 @@ impl Fidd {
 			};
 			let mut window = 2;
 			loop {
-				for dst_idx in std::mem::take(&mut indices).into_iter() {
-					if src_idx + window >= src.len() {
-						break
-					}
+				let mut new_indices = Vec::new();
+				if src_idx + window >= src.len() {
+					break
+				}
+				for dst_idx in last_indices.clone().into_iter() {
 					if dst_idx + window >= dst.len() {
 						continue
 					}
 					if src[src_idx + window] == dst[dst_idx + window] {
-						indices.push(dst_idx);
+						new_indices.push(dst_idx);
 					}
 				}
-				if indices.is_empty() {
+				if new_indices.is_empty() {
 					break
 				}
+				last_indices = new_indices;
 				window += 1;
 			}
 			let window = window - 1;
 			if window < 2 { continue }
-			for dst_idx in indices.into_iter() {
-				segments.push([dst_idx, window, src_idx]);
+			for dst_idx in last_indices.into_iter() {
+				let dst_end = dst_idx + window;
+				segments.push([dst_idx, dst_end, src_idx, window]);
 			}
 		}
 		segments.sort_unstable();
-		let mut segments_idx = 0;
+		let mut segment_cursor = 0;
 		let mut items = Vec::new();
-		for dst_idx in 0..dst.len() {
-			if segments_idx >= segments.len() ||
-				segments[segments_idx][0] > dst_idx
-			{
-				items.push(Item::New(dst[dst_idx].clone()));
-				continue
-			}
-			assert!(segments[segments_idx][0] == dst_idx);
-			while segments_idx < segments.len() {
-				if segments[segments_idx][0] == dst_idx {
-					segments_idx += 1;
+		let mut dst_cursor = 0;
+		loop {
+			// update segments cursor
+			let mut exit_inner_loop = false;
+			let finish_flag = 'inner: loop {
+				if segment_cursor >= segments.len() {
+					for dst_idx in dst_cursor..dst.len() {
+						items.push(Item::New(dst[dst_idx].clone()));
+					}
+					break 'inner true
+				}
+				if exit_inner_loop { break 'inner false }
+				let seg = &segments[segment_cursor];
+				if seg[1] < dst_cursor {
+					segment_cursor += 1;
 				} else {
+					exit_inner_loop = true;
+				}
+			};
+			if finish_flag { break }
+
+			// find farthest cover segment
+			let mut farthest = 0;
+			let mut farthest_idx = 0;
+			for segment_idx in segment_cursor..segments.len() {
+				let segment = &segments[segment_idx];
+				if segment[0] > dst_cursor {
 					break
 				}
+				if segment[1] > farthest {
+					farthest = segment[1];
+					farthest_idx = segment_idx;
+				}
 			}
-			let seg = &segments[segments_idx - 1];
-			let item = Item::FromSrc(seg[2], seg[1]);
-			items.push(item);
+			if farthest <= dst_cursor + 1 {
+				items.push(Item::New(dst[dst_cursor].clone()));
+				dst_cursor += 1
+			} else {
+				let segment = &segments[farthest_idx];
+				items.push(Item::FromSrc(segment[2], segment[3]));
+				dst_cursor = segment[1];
+			}
 		}
 		Self {items}
+	}
+
+	pub fn apply(&self, src: &[Vec<u8>]) -> Vec<Vec<u8>> {
+		let mut result = Vec::new();
+		for item in self.items.iter() {
+			match item {
+				Item::New(line) => result.push(line.clone()),
+				Item::FromSrc(idx, len) => {
+					for offset in 0..*len {
+						result.push(src[idx + offset].clone());
+					}
+				}
+			}
+		}
+		result
 	}
 }
