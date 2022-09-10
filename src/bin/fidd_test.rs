@@ -15,4 +15,5 @@ fn main() {
 	}
 	let fidd = Fidd::new(&lines1, &lines2);
 	eprintln!("{}", fidd.len());
+	fidd.save("/tmp/fidd_test.fidd").unwrap();
 }

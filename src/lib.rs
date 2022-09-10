@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::io::{BufWriter, Write};
 
 #[derive(Default)]
 pub struct Fidd {
@@ -6,7 +7,7 @@ pub struct Fidd {
 }
 
 enum Item {
-	New(Vec<u8>),
+	New(Vec<Vec<u8>>),
 	FromSrc(usize, usize), // src line idx, len
 }
 
@@ -21,7 +22,6 @@ impl Fidd {
 
 	// TODO: fast mode(src_idx step window)
 	pub fn new(src: &[Vec<u8>], dst: &[Vec<u8>]) -> Self {
-		eprintln!("{} {}", src.len(), dst.len());
 		let mut pairmap = HashMap::new();
 		if dst.is_empty() {
 			return Self::default()
@@ -32,7 +32,7 @@ impl Fidd {
 		}
 		let mut segments = Vec::new();
 		for src_idx in 0..src.len() - 1 {
-			eprintln!("{}", src_idx);
+			eprint!("[2K{}/{}\r", src_idx, src.len());
 			let mut last_indices = if let Some(indices)
 				= pairmap.get(&[&src[src_idx], &src[src_idx + 1]])
 			{
@@ -67,6 +67,7 @@ impl Fidd {
 				segments.push([dst_idx, dst_end, src_idx, window]);
 			}
 		}
+		eprintln!();
 		segments.sort_unstable();
 		let mut segment_cursor = 0;
 		let mut items = Vec::new();
@@ -76,8 +77,12 @@ impl Fidd {
 			let mut exit_inner_loop = false;
 			let finish_flag = 'inner: loop {
 				if segment_cursor >= segments.len() {
+					let mut new = Vec::new();
 					for dst_idx in dst_cursor..dst.len() {
-						items.push(Item::New(dst[dst_idx].clone()));
+						new.push(dst[dst_idx].clone());
+					}
+					if !new.is_empty() {
+						items.push(Item::New(new));
 					}
 					break 'inner true
 				}
@@ -105,7 +110,13 @@ impl Fidd {
 				}
 			}
 			if farthest <= dst_cursor + 1 {
-				items.push(Item::New(dst[dst_cursor].clone()));
+				match items.last_mut() {
+					Some(Item::New(x)) => x.push(dst[dst_cursor].clone()),
+					_ => {
+						let new = vec![dst[dst_cursor].clone()];
+						items.push(Item::New(new));
+					},
+				}
 				dst_cursor += 1
 			} else {
 				let segment = &segments[farthest_idx];
@@ -120,7 +131,9 @@ impl Fidd {
 		let mut result = Vec::new();
 		for item in self.items.iter() {
 			match item {
-				Item::New(line) => result.push(line.clone()),
+				Item::New(lines) => for line in lines.iter() {
+					result.push(line.clone());
+				}
 				Item::FromSrc(idx, len) => {
 					for offset in 0..*len {
 						result.push(src[idx + offset].clone());
@@ -130,4 +143,26 @@ impl Fidd {
 		}
 		result
 	}
+
+	pub fn save(&self, file: &str) -> Result<(), std::io::Error> {
+		let f = std::fs::File::create(file).unwrap();
+		let mut f = BufWriter::new(f);
+		for item in self.items.iter() {
+			match item {
+				Item::New(lines) => {
+					writeln!(f, "new {}", lines.len())?;
+					for line in lines.iter() {
+						f.write(line)?;
+						writeln!(f)?;
+					}
+				},
+				Item::FromSrc(idx, len) => {
+					writeln!(f, "src {} {}", idx, len)?;
+				}
+			}
+		}
+		Ok(())
+	}
 }
+
+// TODO test: case 12121212
