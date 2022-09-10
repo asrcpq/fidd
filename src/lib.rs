@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::io::{BufWriter, Write};
+use std::io::{BufReader, BufRead, BufWriter, Write};
 
 #[derive(Default)]
 pub struct Fidd {
@@ -16,6 +16,17 @@ impl Fidd {
 		self.items.len()
 	}
 
+	pub fn dst_len(&self) -> usize {
+		let mut result = 0;
+		for item in self.items.iter() {
+			match item {
+				Item::New(x) => result += x.len(),
+				Item::FromSrc(_, len) => result += len,
+			}
+		}
+		return result
+	}
+
 	pub fn is_empty(&self) -> bool {
 		self.items.is_empty()
 	}
@@ -26,10 +37,14 @@ impl Fidd {
 		if dst.is_empty() {
 			return Self::default()
 		}
+
+		// build pairmap
 		for dst_idx in 0..dst.len() - 1 {
 			let e = pairmap.entry([&dst[dst_idx], &dst[dst_idx + 1]]).or_insert(Vec::new());
 			e.push(dst_idx);
 		}
+
+		// build segments mapping
 		let mut segments = Vec::new();
 		for src_idx in 0..src.len() - 1 {
 			eprint!("[2K{}/{}\r", src_idx, src.len());
@@ -69,6 +84,8 @@ impl Fidd {
 		}
 		eprintln!();
 		segments.sort_unstable();
+
+		// incremental matching
 		let mut segment_cursor = 0;
 		let mut items = Vec::new();
 		let mut dst_cursor = 0;
@@ -120,7 +137,8 @@ impl Fidd {
 				dst_cursor += 1
 			} else {
 				let segment = &segments[farthest_idx];
-				items.push(Item::FromSrc(segment[2], segment[3]));
+				let offset = dst_cursor - segment[0];
+				items.push(Item::FromSrc(segment[2] + offset, segment[3] - offset));
 				dst_cursor = segment[1];
 			}
 		}
@@ -145,7 +163,7 @@ impl Fidd {
 	}
 
 	pub fn save(&self, file: &str) -> Result<(), std::io::Error> {
-		let f = std::fs::File::create(file).unwrap();
+		let f = std::fs::File::create(file)?;
 		let mut f = BufWriter::new(f);
 		for item in self.items.iter() {
 			match item {
@@ -162,6 +180,43 @@ impl Fidd {
 			}
 		}
 		Ok(())
+	}
+
+	pub fn load(file: &str) -> Result<Self, std::io::Error> {
+		let f = std::fs::File::open(file)?;
+		let mut f = BufReader::new(f);
+		let mut linebuf = Vec::new();
+		let mut items = Vec::new();
+		loop {
+			let buflen = f.read_until(b'\n', &mut linebuf)?;
+			if buflen == 0 { break }
+			assert_eq!(linebuf[buflen - 1], b'\n');
+			linebuf.pop();
+			let string = String::from_utf8(std::mem::take(&mut linebuf)).unwrap();
+			let mut iter = string.split_whitespace();
+			match iter.next() {
+				Some("src") => {
+					let idx = iter.next().unwrap().parse::<usize>().unwrap();
+					let len = iter.next().unwrap().parse::<usize>().unwrap();
+					let item = Item::FromSrc(idx, len);
+					items.push(item);
+				}
+				Some("new") => {
+					let line_count = iter.next().unwrap().parse::<usize>().unwrap();
+					let mut new = Vec::new();
+					for _ in 0..line_count {
+						let buflen = f.read_until(b'\n', &mut linebuf)?;
+						assert_eq!(linebuf[buflen - 1], b'\n');
+						linebuf.pop();
+						new.push(std::mem::take(&mut linebuf));
+					}
+					let item = Item::New(new);
+					items.push(item);
+				}
+				_ => panic!("Unknown description line: {}", string)
+			}
+		}
+		Ok(Self {items})
 	}
 }
 

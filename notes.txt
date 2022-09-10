@@ -1,1 +1,1 @@
-change: add save, compact new lines
+change: fix offset bug in patch gen, add patch loader

@@ -14,6 +14,10 @@ fn main() {
 		}
 	}
 	let fidd = Fidd::new(&lines1, &lines2);
+	assert_eq!(fidd.dst_len(), lines2.len());
 	eprintln!("{}", fidd.len());
 	fidd.save("/tmp/fidd_test.fidd").unwrap();
+	let fidd = Fidd::load("/tmp/fidd_test.fidd").unwrap();
+	let lines3 = fidd.apply(&lines1);
+	assert_eq!(lines2.len(), lines3.len());
 }
